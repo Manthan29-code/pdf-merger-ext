@@ -48,6 +48,11 @@ chrome.tabs.onCreated.addListener((tab) => {
 
 // Refresh all current tabs on extension load
 chrome.tabs.query({}, (tabs) => {
+  if (chrome.runtime.lastError) {
+    console.warn('chrome.tabs.query failed on init:', chrome.runtime.lastError);
+    return;
+  }
+  if (!tabs || !tabs.forEach) return;
   tabs.forEach(updateTab);
 });
 
@@ -56,6 +61,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'GET_PDF_TABS') {
     // Also do a fresh query to catch anything we missed
     chrome.tabs.query({}, (tabs) => {
+      if (chrome.runtime.lastError) {
+        console.warn('chrome.tabs.query failed in GET_PDF_TABS:', chrome.runtime.lastError);
+        // Respond with whatever we currently know
+        sendResponse({ pdfs: Array.from(pdfTabs.values()) });
+        return;
+      }
+      if (!tabs || !tabs.forEach) {
+        sendResponse({ pdfs: Array.from(pdfTabs.values()) });
+        return;
+      }
       // Update our map with latest state
       tabs.forEach(tab => {
         if (isPDF(tab.url, tab.title)) {
@@ -78,9 +93,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === 'FOCUS_TAB') {
-    chrome.tabs.update(msg.tabId, { active: true });
-    chrome.tabs.get(msg.tabId, (tab) => {
-      if (tab) chrome.windows.update(tab.windowId, { focused: true });
+    chrome.tabs.update(msg.tabId, { active: true }, () => {
+      if (chrome.runtime.lastError) {
+        console.warn('chrome.tabs.update failed in FOCUS_TAB:', chrome.runtime.lastError);
+      }
+      chrome.tabs.get(msg.tabId, (tab) => {
+        if (chrome.runtime.lastError) {
+          console.warn('chrome.tabs.get failed in FOCUS_TAB:', chrome.runtime.lastError);
+          return;
+        }
+        if (tab) chrome.windows.update(tab.windowId, { focused: true }, () => {
+          if (chrome.runtime.lastError) console.warn('chrome.windows.update failed in FOCUS_TAB:', chrome.runtime.lastError);
+        });
+      });
     });
     sendResponse({ ok: true });
     return true;
