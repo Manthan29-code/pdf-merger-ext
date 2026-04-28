@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF Tab Merger</title>
+  <style>
+    /* ─── Design Tokens — 3-colour rule ─────────────────────────────
+       #F7F4EF  cream-white   → background / surface
+       #2B3A55  deep navy     → text, icons, borders
+       #D4845A  terracotta    → accent / action
+    ──────────────────────────────────────────────────────────────── */
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #F7F4EF;
+      --surface:   #EDEAE3;
+      --navy:      #2B3A55;
+      --navy-dim:  #4A5C78;
+      --accent:    #D4845A;
+      --accent-dk: #B8673F;
+      --border:    #D8D4CC;
+      --radius:    10px;
+      --trans:     180ms ease;
+    }
+
+    html, body {
+      width: 380px;
+      height: 560px;
+      overflow: hidden;
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--navy);
+    }
+
+    /* ─── Layout ───────────────────────────────────────────────── */
+    .shell {
+      display: flex;
+      flex-direction: column;
+      height: 560px;
+    }
+
+    /* ─── Header ───────────────────────────────────────────────── */
+    header {
+      flex-shrink: 0;
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .header-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .logo {
+      width: 32px; height: 32px;
+      background: var(--navy);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .logo svg { width: 18px; height: 18px; }
+    .brand { flex: 1; }
+    .brand-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--navy);
+      letter-spacing: -0.3px;
+    }
+    .brand-sub {
+      font-size: 11px;
+      color: var(--navy-dim);
+      font-weight: 400;
+      margin-top: 1px;
+    }
+    .refresh-btn {
+      width: 30px; height: 30px;
+      border: 1.5px solid var(--border);
+      border-radius: 7px;
+      background: transparent;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--navy-dim);
+      transition: var(--trans);
+      flex-shrink: 0;
+    }
+    .refresh-btn:hover { border-color: var(--navy); color: var(--navy); background: var(--surface); }
+    .refresh-btn svg { width: 14px; height: 14px; }
+
+    /* ─── Toolbar ──────────────────────────────────────────────── */
+    .toolbar {
+      flex-shrink: 0;
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .pill-btn {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 11.5px;
+      font-weight: 500;
+      padding: 5px 11px;
+      border-radius: 100px;
+      border: 1.5px solid var(--border);
+      background: transparent;
+      color: var(--navy-dim);
+      cursor: pointer;
+      transition: var(--trans);
+    }
+    .pill-btn:hover { border-color: var(--navy); color: var(--navy); }
+    .pill-btn.danger:hover { border-color: #c0392b; color: #c0392b; }
+    .spacer { flex: 1; }
+    .count-badge {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: 100px;
+      background: var(--navy);
+      color: var(--bg);
+    }
+
+    /* ─── Empty state ──────────────────────────────────────────── */
+    .empty {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 24px;
+      text-align: center;
+    }
+    .empty-icon {
+      width: 56px; height: 56px;
+      border-radius: 14px;
+      background: var(--surface);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .empty-icon svg { width: 26px; height: 26px; color: var(--navy-dim); }
+    .empty h3 { font-size: 14px; font-weight: 600; color: var(--navy); }
+    .empty p { font-size: 12px; color: var(--navy-dim); line-height: 1.5; max-width: 220px; }
+
+    /* ─── PDF List ─────────────────────────────────────────────── */
+    .list-wrap {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 10px 12px;
+      scroll-behavior: smooth;
+    }
+    .list-wrap::-webkit-scrollbar { width: 5px; }
+    .list-wrap::-webkit-scrollbar-track { background: transparent; }
+    .list-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+    .list-wrap::-webkit-scrollbar-thumb:hover { background: var(--navy-dim); }
+
+    /* ─── PDF Item ─────────────────────────────────────────────── */
+    .pdf-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+      border-radius: var(--radius);
+      border: 1.5px solid transparent;
+      background: var(--bg);
+      cursor: default;
+      transition: background var(--trans), border-color var(--trans), box-shadow var(--trans);
+      margin-bottom: 5px;
+      user-select: none;
+    }
+    .pdf-item:hover { background: var(--surface); border-color: var(--border); }
+    .pdf-item.selected {
+      background: #EDF1F7;
+      border-color: var(--navy);
+    }
+    .pdf-item.dragging {
+      opacity: 0.4;
+      border-style: dashed;
+    }
+    .pdf-item.drag-over {
+      border-color: var(--accent);
+      background: #FBF1EB;
+    }
+
+    .drag-handle {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      cursor: grab;
+      padding: 3px 2px;
+      flex-shrink: 0;
+      color: var(--border);
+      transition: color var(--trans);
+    }
+    .drag-handle:active { cursor: grabbing; }
+    .pdf-item:hover .drag-handle { color: var(--navy-dim); }
+    .drag-handle svg { width: 12px; height: 12px; }
+
+    .check-wrap {
+      flex-shrink: 0;
+    }
+    .check {
+      width: 17px; height: 17px;
+      border: 1.5px solid var(--border);
+      border-radius: 5px;
+      background: var(--bg);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: var(--trans);
+      flex-shrink: 0;
+    }
+    .check:hover { border-color: var(--navy); }
+    .check.checked {
+      background: var(--navy);
+      border-color: var(--navy);
+    }
+    .check.checked svg { display: block; }
+    .check svg { display: none; width: 10px; height: 10px; color: var(--bg); }
+
+    .pdf-icon {
+      width: 30px; height: 36px;
+      flex-shrink: 0;
+      position: relative;
+    }
+    .pdf-icon svg { width: 100%; height: 100%; }
+
+    .pdf-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .pdf-title {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--navy);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+      transition: color var(--trans);
+    }
+    .pdf-title:hover { color: var(--accent); text-decoration: underline; }
+    .pdf-url {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      color: var(--navy-dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+
+    .order-num {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--navy-dim);
+      flex-shrink: 0;
+      width: 16px;
+      text-align: center;
+    }
+
+    /* ─── Footer ───────────────────────────────────────────────── */
+    footer {
+      flex-shrink: 0;
+      padding: 12px 18px;
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+    }
+
+    .merge-btn {
+      width: 100%;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13.5px;
+      font-weight: 600;
+      letter-spacing: 0.1px;
+      padding: 11px 18px;
+      border-radius: var(--radius);
+      border: none;
+      background: var(--navy);
+      color: var(--bg);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background var(--trans), transform 80ms ease;
+    }
+    .merge-btn:hover:not(:disabled) { background: var(--accent); }
+    .merge-btn:active:not(:disabled) { transform: scale(0.98); }
+    .merge-btn:disabled {
+      background: var(--border);
+      color: var(--navy-dim);
+      cursor: not-allowed;
+    }
+    .merge-btn svg { width: 16px; height: 16px; }
+
+    .merge-btn.loading {
+      background: var(--navy-dim);
+      cursor: wait;
+    }
+    .spinner {
+      width: 15px; height: 15px;
+      border: 2px solid rgba(247,244,239,0.3);
+      border-top-color: var(--bg);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .footer-hint {
+      font-size: 11px;
+      color: var(--navy-dim);
+      text-align: center;
+      margin-top: 7px;
+    }
+
+    /* ─── Toast ────────────────────────────────────────────────── */
+    .toast {
+      position: fixed;
+      bottom: 72px; left: 50%;
+      transform: translateX(-50%) translateY(10px);
+      background: var(--navy);
+      color: var(--bg);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 8px 16px;
+      border-radius: 100px;
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 250ms, transform 250ms;
+      pointer-events: none;
+      z-index: 100;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    .toast.error { background: #c0392b; }
+
+    /* ─── Progress bar ─────────────────────────────────────────── */
+    .progress-wrap {
+      margin-top: 8px;
+      height: 3px;
+      background: var(--surface);
+      border-radius: 100px;
+      overflow: hidden;
+      display: none;
+    }
+    .progress-wrap.visible { display: block; }
+    .progress-bar {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 100px;
+      width: 0%;
+      transition: width 300ms ease;
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- Header -->
+  <header>
+    <div class="header-row">
+      <div class="logo">
+        <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="3" y="1" width="11" height="14" rx="1.5" fill="#F7F4EF" opacity="0.2"/>
+          <rect x="3" y="1" width="11" height="14" rx="1.5" stroke="#F7F4EF" stroke-width="1.3"/>
+          <path d="M6 6h5M6 9h5M6 12h3" stroke="#F7F4EF" stroke-width="1.2" stroke-linecap="round"/>
+          <circle cx="15" cy="14" r="4" fill="#D4845A"/>
+          <path d="M13.5 14l1 1 2-2" stroke="#F7F4EF" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="brand">
+        <div class="brand-name">PDF Tab Merger</div>
+        <div class="brand-sub">Select, reorder, merge — offline</div>
+      </div>
+      <button class="refresh-btn" id="refreshBtn" title="Refresh PDF list">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5c1.8 0 3.4.86 4.4 2.2"/>
+          <path d="M13.5 2.5v2.2H11.3"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Toolbar -->
+  <div class="toolbar" id="toolbar" style="display:none">
+    <button class="pill-btn" id="selectAllBtn">Select all</button>
+    <button class="pill-btn danger" id="deselectAllBtn">Clear</button>
+    <div class="spacer"></div>
+    <div class="count-badge" id="selCount">0 / 0</div>
+  </div>
+
+  <!-- PDF List -->
+  <div class="list-wrap" id="listWrap">
+    <div class="empty" id="emptyState">
+      <div class="empty-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="9" y1="13" x2="15" y2="13"/>
+          <line x1="9" y1="17" x2="15" y2="17"/>
+          <polyline points="9 9 10 9"/>
+        </svg>
+      </div>
+      <h3>No PDFs open</h3>
+      <p>Open PDF files in your browser tabs and they'll appear here automatically.</p>
+    </div>
+    <div id="pdfList"></div>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <button class="merge-btn" id="mergeBtn" disabled>
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 10h12M10 4l6 6-6 6"/>
+      </svg>
+      <span id="mergeBtnLabel">Merge &amp; Download</span>
+    </button>
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <div class="footer-hint" id="footerHint">Select PDFs above to merge them</div>
+  </footer>
+
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="pdf-lib.min.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>
