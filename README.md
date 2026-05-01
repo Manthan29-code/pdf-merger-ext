@@ -75,7 +75,7 @@ Your documents never leave your machine. Not even to `localhost`.
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/Manthan29-code/pdf-tab-merger.git
+git clone https://github.com/Manthan29-code/pdf-merger-ext.git
 cd pdf-tab-merger
 
 # 2. No build step needed — it's plain JS
@@ -254,7 +254,7 @@ This project is intentionally small and readable. The entire logic lives in two 
 
 ```bash
 # Fork the repo on GitHub, then:
-git clone https://github.com/Manthan29-code/pdf-tab-merger.git
+git clone https://github.com/Manthan29-code/pdf-merger-ext.git
 cd pdf-tab-merger
 
 # Make your changes
