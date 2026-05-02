@@ -49,6 +49,9 @@ PDF Tab Merger sits quietly in your browser toolbar. When you have PDFs open in 
 - **Detects them automatically** — no manual file selection, no drag-and-drop from Finder/Explorer
 - **Lets you pick which ones** to include, with checkboxes
 - **Lets you set the order** by dragging items up and down
+- **Lets you choose page ranges** per file, like `1-3`, `2,5,9`, or blank for all pages
+- **Splits a single PDF** by extracting the chosen page range into a new download
+- **Optionally compresses merged output** with a quality slider for smaller saved PDFs
 - **Merges and downloads** the result as a single PDF — entirely in your browser, using your CPU, with no network request made
 
 Your documents never leave your machine. Not even to `localhost`.
@@ -61,6 +64,9 @@ Your documents never leave your machine. Not even to `localhost`.
 - **Select / deselect** individual PDFs with one click
 - **Select All / Clear** toolbar buttons for bulk actions
 - **Drag-and-drop reordering** — set the exact page order before merging
+- **Page range selection** — include all pages or specify exact ranges per PDF before merging
+- **Split PDF** — extract selected pages from one open PDF tab into a standalone PDF
+- **Compress on merge** — re-save merged PDFs with object streams and a quality preference slider
 - **Click any title** to jump directly to that tab
 - **Progress bar** during merge so you know it's working
 - **Fixed popup** — 380×560px with a scrollbar if you have many PDFs open
@@ -168,9 +174,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 ```
 
-### PDF merging with pdf-lib
+### PDF merging, page ranges, and splitting
 
-The actual merging happens entirely in `popup.js` using [pdf-lib](https://pdf-lib.js.org/), a pure JavaScript PDF manipulation library with no native dependencies.
+The actual PDF work happens in the popup using [pdf-lib](https://pdf-lib.js.org/), a pure JavaScript PDF manipulation library with no native dependencies. `popup.js` coordinates the UI, while feature modules keep the range parsing, splitting, and compression behavior separate.
 
 ```javascript
 const { PDFDocument } = PDFLib;
@@ -179,13 +185,18 @@ const merged = await PDFDocument.create();
 for (const pdf of selectedPdfsInOrder) {
   const bytes = await fetch(pdf.url).then(r => r.arrayBuffer());
   const srcDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-  const pages  = await merged.copyPages(srcDoc, srcDoc.getPageIndices());
+  const pageIndices = PageRanges.parse(PageRanges.get(pdf.tabId), srcDoc.getPageCount());
+  const pages = await merged.copyPages(srcDoc, pageIndices);
   pages.forEach(page => merged.addPage(page));
 }
 
-const outBytes = await merged.save();
+const outBytes = await CompressMerge.save(merged);
 // → Uint8Array, then Blob, then download via <a> click
 ```
+
+Page range fields accept values like `1-3`, `2,5,9`, or blank for all pages. The Split button uses the same range parser, but copies pages from just one PDF into a new output file.
+
+Compression is intentionally local and dependency-light: it re-saves the merged PDF with pdf-lib object streams and quality preference settings. It can reduce output size for some PDFs, but it does not downsample embedded images.
 
 The `ignoreEncryption: true` flag allows reading password-protected PDFs that have their protection metadata set but are otherwise readable — useful for PDFs with "open" but no actual password enforcement.
 
@@ -226,7 +237,10 @@ pdf-tab-merger/
 ├── background.js       # Service worker: tab tracking, message handling
 ├── content.js          # Content script (intentionally minimal)
 ├── popup.html          # Extension popup UI — fixed 380×560px
-├── popup.js            # UI logic: render, select, drag, merge, download
+├── popup.js            # Popup coordinator: render, select, drag, merge, split, download
+├── page-ranges.js      # Page range state and parser, e.g. 1-3,5
+├── split-pdf.js        # Extract selected pages from one PDF
+├── compress-merge.js   # Merge output compression settings
 ├── pdf-lib.min.js      # Bundled pdf-lib v1.17.1 — no CDN, works offline
 └── icons/
     ├── icon16.png
@@ -238,13 +252,13 @@ pdf-tab-merger/
 
 ## 🤝 Contribute
 
-This project is intentionally small and readable. The entire logic lives in two files under 300 lines combined. It's a great codebase to contribute to — whether you're a beginner or a seasoned developer.
+This project is intentionally small and readable. The popup is split into one coordinator plus small feature files, so each concern stays easy to follow. It's a great codebase to contribute to — whether you're a beginner or a seasoned developer.
 
 ### Good first issues
 
 - [ ] **Optional persistence** — let users opt-in to remembering their last selection via `chrome.storage.session`
 - [ ] **PDF preview thumbnails** — render page 1 of each PDF as a tiny preview in the list
-- [ ] **Page range selection** — let users pick which pages to include from each PDF
+- [ ] **Advanced compression** — optionally downsample embedded images with an offline renderer/compressor
 - [ ] **Chrome Web Store release** — package, screenshots, store listing
 - [ ] **Firefox support** — the extension is largely compatible with WebExtensions API; needs testing + manifest tweaks
 - [ ] **Keyboard shortcuts** — select all with `Ctrl+A`, merge with `Enter`
