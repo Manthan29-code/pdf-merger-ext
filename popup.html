@@ -159,7 +159,8 @@
 
     /* ─── PDF Item ─────────────────────────────────────────────── */
     .pdf-item {
-      display: flex;
+      display: grid;
+      grid-template-columns: auto auto 42px minmax(0, 1fr) auto;
       align-items: center;
       gap: 10px;
       padding: 9px 10px;
@@ -251,7 +252,50 @@
       text-overflow: ellipsis;
       margin-top: 2px;
     }
-
+    .pdf-controls {
+      grid-column: 3 / 6;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      margin-top: 2px;
+    }
+    .range-input {
+      width: 100%;
+      min-width: 0;
+      height: 26px;
+      border: 1.5px solid var(--border);
+      border-radius: 7px;
+      background: var(--bg);
+      color: var(--navy);
+      font-family: 'DM Mono', monospace;
+      font-size: 10.5px;
+      padding: 0 8px;
+      outline: none;
+      transition: border-color var(--trans), background var(--trans);
+    }
+    .range-input:focus {
+      border-color: var(--accent);
+      background: #FBF1EB;
+    }
+    .split-btn {
+      height: 26px;
+      padding: 0 9px;
+      border-radius: 7px;
+      border: 1.5px solid var(--border);
+      background: transparent;
+      color: var(--navy-dim);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 10.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--trans);
+    }
+    .split-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: #FBF1EB;
+    }
     .order-num {
       font-family: 'DM Mono', monospace;
       font-size: 10px;
@@ -315,6 +359,41 @@
       color: var(--navy-dim);
       text-align: center;
       margin-top: 7px;
+    }
+    .merge-options {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 9px;
+    }
+    .compress-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--navy-dim);
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .compress-toggle input {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--navy);
+    }
+    .quality-slider {
+      flex: 1;
+      min-width: 80px;
+      accent-color: var(--accent);
+    }
+    .quality-slider:disabled {
+      opacity: .45;
+    }
+    .quality-value {
+      width: 30px;
+      text-align: right;
+      font-family: 'DM Mono', monospace;
+      font-size: 10.5px;
+      color: var(--navy-dim);
     }
 
     /* ─── Toast ────────────────────────────────────────────────── */
@@ -415,6 +494,14 @@
 
   <!-- Footer -->
   <footer>
+    <div class="merge-options">
+      <label class="compress-toggle" title="Re-save merged output with PDF object streams">
+        <input type="checkbox" id="compressToggle">
+        <span>Compress</span>
+      </label>
+      <input class="quality-slider" id="qualitySlider" type="range" min="20" max="95" value="70" disabled title="Quality preference">
+      <span class="quality-value" id="qualityValue">off</span>
+    </div>
     <button class="merge-btn" id="mergeBtn" disabled>
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M4 10h12M10 4l6 6-6 6"/>
@@ -433,6 +520,9 @@
 <div class="toast" id="toast"></div>
 
 <script src="pdf-lib.min.js"></script>
+<script src="page-ranges.js"></script>
+<script src="split-pdf.js"></script>
+<script src="compress-merge.js"></script>
 <script src="popup.js"></script>
 </body>
 </html>

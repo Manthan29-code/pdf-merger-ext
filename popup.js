@@ -1,46 +1,52 @@
-// popup.js — all in-memory, no localStorage
+// popup.js - popup coordinator, in-memory only
 
-// ─── State (in-memory only) ──────────────────────────────────────
-let allPdfs = [];        // [{ tabId, url, title }]
-let selected = new Set();// Set of tabId
-let order = [];          // ordered array of tabId
+let allPdfs = [];
+let selected = new Set();
+let order = [];
 
-// ─── DOM refs ───────────────────────────────────────────────────
-const pdfList    = document.getElementById('pdfList');
+const pdfList = document.getElementById('pdfList');
 const emptyState = document.getElementById('emptyState');
-const toolbar    = document.getElementById('toolbar');
-const selCount   = document.getElementById('selCount');
-const mergeBtn   = document.getElementById('mergeBtn');
-const mergeBtnLabel = document.getElementById('mergeBtnLabel');
+const toolbar = document.getElementById('toolbar');
+const selCount = document.getElementById('selCount');
+const mergeBtn = document.getElementById('mergeBtn');
 const refreshBtn = document.getElementById('refreshBtn');
-const selectAllBtn   = document.getElementById('selectAllBtn');
+const selectAllBtn = document.getElementById('selectAllBtn');
 const deselectAllBtn = document.getElementById('deselectAllBtn');
 const footerHint = document.getElementById('footerHint');
 const progressWrap = document.getElementById('progressWrap');
-const progressBar  = document.getElementById('progressBar');
-const toastEl    = document.getElementById('toast');
+const progressBar = document.getElementById('progressBar');
+const toastEl = document.getElementById('toast');
+const compressToggle = document.getElementById('compressToggle');
+const qualitySlider = document.getElementById('qualitySlider');
+const qualityValue = document.getElementById('qualityValue');
 
-// ─── Toast ───────────────────────────────────────────────────────
 let toastTimer;
+let dragSrcId = null;
+
+CompressMerge.bind({
+  checkbox: compressToggle,
+  slider: qualitySlider,
+  value: qualityValue
+});
+
 function toast(msg, isError = false) {
   clearTimeout(toastTimer);
   toastEl.textContent = msg;
-  toastEl.className = 'toast show' + (isError ? ' error' : '');
+  toastEl.className = `toast show${isError ? ' error' : ''}`;
   toastTimer = setTimeout(() => { toastEl.className = 'toast'; }, 2800);
 }
 
-// ─── Progress ────────────────────────────────────────────────────
 function setProgress(pct) {
   if (pct === null) {
     progressWrap.classList.remove('visible');
     progressBar.style.width = '0%';
-  } else {
-    progressWrap.classList.add('visible');
-    progressBar.style.width = pct + '%';
+    return;
   }
+
+  progressWrap.classList.add('visible');
+  progressBar.style.width = `${pct}%`;
 }
 
-// ─── Fetch PDF tabs from background ─────────────────────────────
 function loadPdfs() {
   refreshBtn.style.opacity = '0.4';
   chrome.runtime.sendMessage({ type: 'GET_PDF_TABS' }, (res) => {
@@ -51,58 +57,47 @@ function loadPdfs() {
     }
 
     const incoming = res.pdfs || [];
-
-    // Preserve existing order for tabs still present
-    const incomingIds = new Set(incoming.map(p => p.tabId));
+    const incomingIds = new Set(incoming.map(pdf => pdf.tabId));
     const newOrder = order.filter(id => incomingIds.has(id));
 
-    // Append any new IDs not yet in order
-    for (const p of incoming) {
-      if (!newOrder.includes(p.tabId)) newOrder.push(p.tabId);
+    for (const pdf of incoming) {
+      if (!newOrder.includes(pdf.tabId)) newOrder.push(pdf.tabId);
     }
 
-    // Remove selected that are no longer present
     for (const id of selected) {
       if (!incomingIds.has(id)) selected.delete(id);
     }
+    PageRanges.prune(incomingIds);
 
     allPdfs = incoming;
-    order   = newOrder;
+    order = newOrder;
     render();
   });
 }
 
-// ─── Render list ─────────────────────────────────────────────────
 function render() {
   const hasPdfs = allPdfs.length > 0;
   emptyState.style.display = hasPdfs ? 'none' : 'flex';
-  toolbar.style.display     = hasPdfs ? 'flex' : 'none';
-
+  toolbar.style.display = hasPdfs ? 'flex' : 'none';
   pdfList.innerHTML = '';
 
-  const map = Object.fromEntries(allPdfs.map(p => [p.tabId, p]));
-
-  order.forEach((tabId, idx) => {
+  const map = Object.fromEntries(allPdfs.map(pdf => [pdf.tabId, pdf]));
+  order.forEach((tabId, index) => {
     const pdf = map[tabId];
     if (!pdf) return;
-    const isChecked = selected.has(tabId);
-    pdfList.appendChild(buildItem(pdf, idx + 1, isChecked));
+    pdfList.appendChild(buildItem(pdf, index + 1, selected.has(tabId)));
   });
 
   updateCounts();
   attachDragEvents();
 }
 
-// ─── Build single PDF item ────────────────────────────────────────
 function buildItem(pdf, num, isChecked) {
   const item = document.createElement('div');
-  item.className = 'pdf-item' + (isChecked ? ' selected' : '');
+  item.className = `pdf-item${isChecked ? ' selected' : ''}`;
   item.dataset.id = pdf.tabId;
 
-  const shortUrl = (() => {
-    try { return new URL(pdf.url).hostname; } catch { return pdf.url.slice(0, 40); }
-  })();
-
+  const shortUrl = getShortUrl(pdf.url);
   item.innerHTML = `
     <div class="drag-handle" draggable="true" title="Drag to reorder">
       <svg viewBox="0 0 12 12" fill="currentColor">
@@ -112,7 +107,7 @@ function buildItem(pdf, num, isChecked) {
       </svg>
     </div>
     <div class="check-wrap">
-      <div class="check ${isChecked ? 'checked' : ''}" data-id="${pdf.tabId}">
+      <div class="check ${isChecked ? 'checked' : ''}" data-id="${pdf.tabId}" title="Include in merge">
         <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="1.5,5 4,7.5 8.5,2"/>
         </svg>
@@ -129,41 +124,45 @@ function buildItem(pdf, num, isChecked) {
       </svg>
     </div>
     <div class="pdf-info">
-      <div class="pdf-title" data-tabid="${pdf.tabId}" title="${escHtml(pdf.title)}">${escHtml(truncate(pdf.title, 45))}</div>
+      <div class="pdf-title" data-tabid="${pdf.tabId}" title="${escHtml(pdf.title)}">${escHtml(truncate(pdf.title, 42))}</div>
       <div class="pdf-url">${escHtml(shortUrl)}</div>
     </div>
     <div class="order-num">${num}</div>
+    <div class="pdf-controls">
+      <input class="range-input" data-id="${pdf.tabId}" value="${escHtml(PageRanges.get(pdf.tabId))}" placeholder="pages: all, 1-3, 5" title="Pages to include when merging or splitting">
+      <button class="split-btn" data-id="${pdf.tabId}" title="Extract this range into a new PDF">Split</button>
+    </div>
   `;
 
-  // Click checkbox
-  item.querySelector('.check').addEventListener('click', (e) => {
-    e.stopPropagation();
+  item.querySelector('.check').addEventListener('click', (event) => {
+    event.stopPropagation();
     toggleSelect(pdf.tabId);
   });
 
-  // Click title → focus tab
-  item.querySelector('.pdf-title').addEventListener('click', (e) => {
-    e.stopPropagation();
+  item.querySelector('.pdf-title').addEventListener('click', (event) => {
+    event.stopPropagation();
     chrome.runtime.sendMessage({ type: 'FOCUS_TAB', tabId: pdf.tabId });
   });
 
-  // Click row → toggle (except drag handle and title)
-  item.addEventListener('click', (e) => {
-    if (e.target.closest('.drag-handle') || e.target.closest('.pdf-title')) return;
+  item.querySelector('.range-input').addEventListener('click', event => event.stopPropagation());
+  item.querySelector('.range-input').addEventListener('input', (event) => {
+    PageRanges.set(pdf.tabId, event.target.value);
+    updateCounts();
+  });
+
+  item.querySelector('.split-btn').addEventListener('click', async (event) => {
+    event.stopPropagation();
+    await splitOnePdf(pdf);
+  });
+
+  item.addEventListener('click', (event) => {
+    if (event.target.closest('.drag-handle, .pdf-title, .range-input, .split-btn')) return;
     toggleSelect(pdf.tabId);
   });
 
   return item;
 }
 
-function escHtml(str) {
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-function truncate(str, max) {
-  return str.length > max ? str.slice(0, max) + '…' : str;
-}
-
-// ─── Select / Deselect ───────────────────────────────────────────
 function toggleSelect(tabId) {
   if (selected.has(tabId)) selected.delete(tabId);
   else selected.add(tabId);
@@ -172,7 +171,7 @@ function toggleSelect(tabId) {
 
 function updateCounts() {
   const total = allPdfs.length;
-  const sel   = selected.size;
+  const sel = selected.size;
   selCount.textContent = `${sel} / ${total}`;
 
   const enabled = sel >= 2;
@@ -180,45 +179,42 @@ function updateCounts() {
   footerHint.textContent = sel === 0
     ? 'Select PDFs above to merge them'
     : sel === 1
-    ? 'Select at least one more PDF'
-    : `${sel} PDFs selected — ready to merge`;
+      ? 'Select at least one more PDF'
+      : `${sel} PDFs selected - ${CompressMerge.hint()}`;
 }
 
 selectAllBtn.addEventListener('click', () => {
-  allPdfs.forEach(p => selected.add(p.tabId));
+  allPdfs.forEach(pdf => selected.add(pdf.tabId));
   render();
 });
+
 deselectAllBtn.addEventListener('click', () => {
   selected.clear();
   render();
 });
-
-// ─── Drag-and-drop reorder ───────────────────────────────────────
-let dragSrcId = null;
 
 function attachDragEvents() {
   const items = pdfList.querySelectorAll('.pdf-item');
   items.forEach(item => {
     const handle = item.querySelector('.drag-handle');
 
-    handle.addEventListener('dragstart', (e) => {
-      dragSrcId = parseInt(item.dataset.id);
-      e.dataTransfer.effectAllowed = 'move';
-      // small delay so the item visually shows as dragging
+    handle.addEventListener('dragstart', (event) => {
+      dragSrcId = Number(item.dataset.id);
+      event.dataTransfer.effectAllowed = 'move';
       setTimeout(() => item.classList.add('dragging'), 0);
     });
 
     handle.addEventListener('dragend', () => {
       item.classList.remove('dragging');
-      pdfList.querySelectorAll('.pdf-item').forEach(i => i.classList.remove('drag-over'));
+      pdfList.querySelectorAll('.pdf-item').forEach(row => row.classList.remove('drag-over'));
       dragSrcId = null;
     });
 
-    item.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      if (parseInt(item.dataset.id) !== dragSrcId) {
-        pdfList.querySelectorAll('.pdf-item').forEach(i => i.classList.remove('drag-over'));
+    item.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      if (Number(item.dataset.id) !== dragSrcId) {
+        pdfList.querySelectorAll('.pdf-item').forEach(row => row.classList.remove('drag-over'));
         item.classList.add('drag-over');
       }
     });
@@ -227,27 +223,30 @@ function attachDragEvents() {
       item.classList.remove('drag-over');
     });
 
-    item.addEventListener('drop', (e) => {
-      e.preventDefault();
+    item.addEventListener('drop', (event) => {
+      event.preventDefault();
       item.classList.remove('drag-over');
-      const targetId = parseInt(item.dataset.id);
-      if (dragSrcId !== null && dragSrcId !== targetId) {
-        const srcIdx = order.indexOf(dragSrcId);
-        const tgtIdx = order.indexOf(targetId);
-        if (srcIdx !== -1 && tgtIdx !== -1) {
-          order.splice(srcIdx, 1);
-          order.splice(tgtIdx, 0, dragSrcId);
-          render();
-        }
-      }
+      const targetId = Number(item.dataset.id);
+      if (dragSrcId === null || dragSrcId === targetId) return;
+
+      const srcIdx = order.indexOf(dragSrcId);
+      const tgtIdx = order.indexOf(targetId);
+      if (srcIdx === -1 || tgtIdx === -1) return;
+
+      order.splice(srcIdx, 1);
+      order.splice(tgtIdx, 0, dragSrcId);
+      render();
     });
   });
 }
 
-// ─── Merge & Download ────────────────────────────────────────────
-mergeBtn.addEventListener('click', async () => {
-  // Build ordered list of selected PDFs
-  const map = Object.fromEntries(allPdfs.map(p => [p.tabId, p]));
+mergeBtn.addEventListener('click', mergeSelectedPdfs);
+refreshBtn.addEventListener('click', loadPdfs);
+compressToggle.addEventListener('change', updateCounts);
+qualitySlider.addEventListener('input', updateCounts);
+
+async function mergeSelectedPdfs() {
+  const map = Object.fromEntries(allPdfs.map(pdf => [pdf.tabId, pdf]));
   const toMerge = order.filter(id => selected.has(id)).map(id => map[id]).filter(Boolean);
 
   if (toMerge.length < 2) {
@@ -255,72 +254,117 @@ mergeBtn.addEventListener('click', async () => {
     return;
   }
 
-  // UI → loading
-  mergeBtn.disabled = true;
-  mergeBtn.classList.add('loading');
-  mergeBtn.innerHTML = `<div class="spinner"></div><span>Merging…</span>`;
+  setBusy(true, 'Merging...');
   setProgress(5);
 
   try {
     const { PDFDocument } = PDFLib;
     const merged = await PDFDocument.create();
+    let totalPages = 0;
 
-    for (let i = 0; i < toMerge.length; i++) {
-      const pdf = toMerge[i];
-      setProgress(5 + Math.round((i / toMerge.length) * 85));
+    for (let index = 0; index < toMerge.length; index += 1) {
+      const pdf = toMerge[index];
+      setProgress(5 + Math.round((index / toMerge.length) * 82));
 
-      let bytes;
-      try {
-        const resp = await fetch(pdf.url);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const buf = await resp.arrayBuffer();
-        bytes = new Uint8Array(buf);
-      } catch (fetchErr) {
-        toast(`Could not fetch: ${truncate(pdf.title, 30)}`, true);
-        throw fetchErr;
-      }
-
+      const bytes = await fetchPdfBytes(pdf);
       const srcDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-      const pages  = await merged.copyPages(srcDoc, srcDoc.getPageIndices());
+      const pageIndices = PageRanges.parse(PageRanges.get(pdf.tabId), srcDoc.getPageCount());
+      const pages = await merged.copyPages(srcDoc, pageIndices);
       pages.forEach(page => merged.addPage(page));
+      totalPages += pageIndices.length;
     }
 
-    setProgress(95);
-    const outBytes = await merged.save();
+    setProgress(92);
+    const outBytes = await CompressMerge.save(merged);
+    savePdfBytes(outBytes, `merged-${toMerge.length}-pdfs.pdf`);
     setProgress(100);
-
-    // Trigger download
-    const blob = new Blob([outBytes], { type: 'application/pdf' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `merged-${toMerge.length}-pdfs.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    toast(`✓ Merged ${toMerge.length} PDFs downloaded!`);
+    toast(`Merged ${totalPages} pages from ${toMerge.length} PDFs`);
     setTimeout(() => setProgress(null), 1000);
-
   } catch (err) {
     console.error('Merge error:', err);
-    if (!err.message?.includes('Could not fetch')) {
-      toast('Merge failed — check console for details', true);
-    }
+    toast(err.message || 'Merge failed - check console for details', true);
     setProgress(null);
   } finally {
-    mergeBtn.classList.remove('loading');
-    mergeBtn.disabled = selected.size < 2;
-    mergeBtn.innerHTML = `
-      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 10h12M10 4l6 6-6 6"/>
-      </svg>
-      <span id="mergeBtnLabel">Merge &amp; Download</span>
-    `;
+    setBusy(false);
   }
-});
+}
 
-// ─── Refresh button ──────────────────────────────────────────────
-refreshBtn.addEventListener('click', loadPdfs);
+async function splitOnePdf(pdf) {
+  setBusy(true, 'Splitting...');
+  setProgress(5);
 
-// ─── Init ────────────────────────────────────────────────────────
+  try {
+    await SplitPdfFeature.split(pdf, PageRanges.get(pdf.tabId), {
+      fetchPdfBytes,
+      savePdfBytes,
+      setProgress,
+      toast,
+      truncate
+    });
+    setTimeout(() => setProgress(null), 1000);
+  } catch (err) {
+    console.error('Split error:', err);
+    toast(err.message || 'Split failed - check console for details', true);
+    setProgress(null);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function fetchPdfBytes(pdf) {
+  try {
+    const resp = await fetch(pdf.url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const buf = await resp.arrayBuffer();
+    return new Uint8Array(buf);
+  } catch (err) {
+    throw new Error(`Could not fetch ${truncate(pdf.title, 30)}`);
+  }
+}
+
+function savePdfBytes(bytes, filename) {
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function setBusy(isBusy, label = '') {
+  mergeBtn.disabled = isBusy || selected.size < 2;
+  if (isBusy) {
+    mergeBtn.classList.add('loading');
+    mergeBtn.innerHTML = `<div class="spinner"></div><span>${escHtml(label)}</span>`;
+    return;
+  }
+
+  mergeBtn.classList.remove('loading');
+  mergeBtn.innerHTML = `
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 10h12M10 4l6 6-6 6"/>
+    </svg>
+    <span id="mergeBtnLabel">Merge &amp; Download</span>
+  `;
+  updateCounts();
+}
+
+function getShortUrl(url) {
+  try { return new URL(url).hostname; } catch { return String(url || '').slice(0, 40); }
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function truncate(str, max) {
+  const value = String(str || '');
+  return value.length > max ? `${value.slice(0, max)}...` : value;
+}
+
 loadPdfs();
