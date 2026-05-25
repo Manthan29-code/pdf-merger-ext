@@ -261,24 +261,39 @@ async function mergeSelectedPdfs() {
     const { PDFDocument } = PDFLib;
     const merged = await PDFDocument.create();
     let totalPages = 0;
+    const mergedPdfs = [];
+    const skippedPdfs = [];
 
     for (let index = 0; index < toMerge.length; index += 1) {
       const pdf = toMerge[index];
       setProgress(5 + Math.round((index / toMerge.length) * 82));
 
-      const bytes = await fetchPdfBytes(pdf);
-      const srcDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-      const pageIndices = PageRanges.parse(PageRanges.get(pdf.tabId), srcDoc.getPageCount());
-      const pages = await merged.copyPages(srcDoc, pageIndices);
-      pages.forEach(page => merged.addPage(page));
-      totalPages += pageIndices.length;
+      try {
+        const bytes = await fetchPdfBytes(pdf);
+        const srcDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+        const pageIndices = PageRanges.parse(PageRanges.get(pdf.tabId), srcDoc.getPageCount());
+        const pages = await merged.copyPages(srcDoc, pageIndices);
+        pages.forEach(page => merged.addPage(page));
+        totalPages += pageIndices.length;
+        mergedPdfs.push(pdf);
+      } catch (err) {
+        console.warn('Skipping inaccessible PDF:', pdf.title, err);
+        skippedPdfs.push({ pdf, err });
+      }
+    }
+
+    if (mergedPdfs.length < 2) {
+      const skippedNames = formatSkippedPdfNames(skippedPdfs);
+      throw new Error(skippedNames
+        ? `Need at least 2 accessible PDFs. Edge blocked: ${skippedNames}`
+        : 'Need at least 2 accessible PDFs.');
     }
 
     setProgress(92);
     const outBytes = await CompressMerge.save(merged);
-    savePdfBytes(outBytes, `merged-${toMerge.length}-pdfs.pdf`);
+    savePdfBytes(outBytes, `merged-${mergedPdfs.length}-pdfs.pdf`);
     setProgress(100);
-    toast(`Merged ${totalPages} pages from ${toMerge.length} PDFs`);
+    toast(buildMergeResultMessage(totalPages, mergedPdfs.length, skippedPdfs));
     setTimeout(() => setProgress(null), 1000);
   } catch (err) {
     console.error('Merge error:', err);
@@ -313,9 +328,14 @@ async function splitOnePdf(pdf) {
 
 async function fetchPdfBytes(pdf) {
   const errors = [];
-  const strategies = isFileUrl(pdf.url)
-    ? [fetchPdfBytesFromTab, fetchPdfBytesFromUrl]
+  const isLocalFile = isFileUrl(pdf.url);
+  const strategies = isLocalFile
+    ? [fetchPdfBytesFromUrl, fetchPdfBytesFromTab]
     : [fetchPdfBytesFromUrl, fetchPdfBytesFromTab];
+
+  if (isLocalFile && !(await hasFileSchemeAccess())) {
+    throw new Error(localFileAccessError(pdf));
+  }
 
   for (const strategy of strategies) {
     try {
@@ -325,11 +345,9 @@ async function fetchPdfBytes(pdf) {
     }
   }
 
-  const title = truncate(pdf.title, 30);
-  const fileHint = isFileUrl(pdf.url)
-    ? ' Edge may need "Allow access to file URLs" enabled for this extension.'
-    : '';
-  throw new Error(`Could not fetch ${title}.${fileHint}`);
+  throw new Error(isLocalFile
+    ? localFileAccessError(pdf)
+    : `Could not fetch ${truncate(pdf.title, 30)}.`);
 }
 
 async function fetchPdfBytesFromUrl(pdf) {
@@ -384,6 +402,39 @@ function base64ToBytes(base64) {
 
 function isFileUrl(url) {
   return /^file:\/\//i.test(String(url || ''));
+}
+
+function hasFileSchemeAccess() {
+  return new Promise(resolve => {
+    if (!chrome.extension || !chrome.extension.isAllowedFileSchemeAccess) {
+      resolve(true);
+      return;
+    }
+
+    chrome.extension.isAllowedFileSchemeAccess(resolve);
+  });
+}
+
+function localFileAccessError(pdf) {
+  return `Could not fetch ${truncate(pdf.title, 30)}. In Edge, enable "Allow access to file URLs" for this extension, then reload the PDF tabs.`;
+}
+
+function buildMergeResultMessage(totalPages, mergedCount, skippedPdfs) {
+  const base = `Merged ${totalPages} pages from ${mergedCount} PDFs`;
+  const skippedNames = formatSkippedPdfNames(skippedPdfs);
+  return skippedNames ? `${base}. Edge blocked: ${skippedNames}` : base;
+}
+
+function formatSkippedPdfNames(skippedPdfs) {
+  if (!skippedPdfs.length) return '';
+
+  const names = skippedPdfs
+    .slice(0, 2)
+    .map(({ pdf }) => truncate(pdf.title, 22))
+    .join(', ');
+  const more = skippedPdfs.length > 2 ? ` +${skippedPdfs.length - 2} more` : '';
+
+  return names + more;
 }
 
 function savePdfBytes(bytes, filename) {
