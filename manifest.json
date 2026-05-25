@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Track, select, reorder, and merge PDFs open in your browser tabs — fully offline.",
   "permissions": ["tabs", "scripting"],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": ["<all_urls>", "file:///*"],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {

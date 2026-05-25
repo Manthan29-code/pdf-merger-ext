@@ -312,14 +312,78 @@ async function splitOnePdf(pdf) {
 }
 
 async function fetchPdfBytes(pdf) {
-  try {
-    const resp = await fetch(pdf.url);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const buf = await resp.arrayBuffer();
-    return new Uint8Array(buf);
-  } catch (err) {
-    throw new Error(`Could not fetch ${truncate(pdf.title, 30)}`);
+  const errors = [];
+  const strategies = isFileUrl(pdf.url)
+    ? [fetchPdfBytesFromTab, fetchPdfBytesFromUrl]
+    : [fetchPdfBytesFromUrl, fetchPdfBytesFromTab];
+
+  for (const strategy of strategies) {
+    try {
+      return await strategy(pdf);
+    } catch (err) {
+      errors.push(err);
+    }
   }
+
+  const title = truncate(pdf.title, 30);
+  const fileHint = isFileUrl(pdf.url)
+    ? ' Edge may need "Allow access to file URLs" enabled for this extension.'
+    : '';
+  throw new Error(`Could not fetch ${title}.${fileHint}`);
+}
+
+async function fetchPdfBytesFromUrl(pdf) {
+  const resp = await fetch(pdf.url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const buf = await resp.arrayBuffer();
+  return new Uint8Array(buf);
+}
+
+async function fetchPdfBytesFromTab(pdf) {
+  if (!pdf.tabId || !pdf.url) {
+    throw new Error('Missing PDF tab details');
+  }
+
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: pdf.tabId },
+    args: [pdf.url],
+    func: async (url) => {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const chunkSize = 0x8000;
+      let binary = '';
+
+      for (let index = 0; index < bytes.length; index += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+      }
+
+      return btoa(binary);
+    }
+  });
+
+  const base64 = results && results[0] && results[0].result;
+  if (!base64) {
+    throw new Error('PDF tab did not return bytes');
+  }
+
+  return base64ToBytes(base64);
+}
+
+function base64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
+}
+
+function isFileUrl(url) {
+  return /^file:\/\//i.test(String(url || ''));
 }
 
 function savePdfBytes(bytes, filename) {
