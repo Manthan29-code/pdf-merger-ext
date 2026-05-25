@@ -95,6 +95,7 @@ Then in Chrome:
 4. Select the `pdf-tab-merger/` folder
 5. Pin the extension from the puzzle-piece menu in your toolbar
 
+> check Read the [Troubleshooting Guide](Permission.md) if your broswer don't allow to access  PDF file . 
 > Chrome Web Store release coming soon. Star the repo to get notified. ⭐
 
 ---
